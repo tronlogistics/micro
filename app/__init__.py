@@ -21,6 +21,14 @@ oid = OpenID(app, os.path.join(basedir, 'tmp'))
 mail = Mail(app)
 babel = Babel(app)
 
+from .views.load import load
+from .views.dashboard import dashboard
+from .views.carrier import carrier
+from .views.static import static
+tronms.register_blueprint(load)
+tronms.register_blueprint(carrier)
+tronms.register_blueprint(dashboard)
+tronms.register_blueprint(static)
 
 class CustomJSONEncoder(JSONEncoder):
     """This class adds support for lazy translation texts to Flask's
