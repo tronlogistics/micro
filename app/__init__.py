@@ -28,9 +28,6 @@ tronms.register_blueprint(carrier)
 tronms.register_blueprint(dashboard)
 tronms.register_blueprint(static)
 
-# Determines the destination of the build. Only usefull if you're using Frozen-Flask
-tronms.config['FREEZER_DESTINATION'] = os.path.dirname(os.path.abspath(__file__))+'/../build'
-
 # Function to easily find your assets
 # In your template use <link rel=stylesheet href="{{ static('filename') }}">
 tronms.jinja_env.globals['static'] = (
