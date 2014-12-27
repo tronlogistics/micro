@@ -6,8 +6,6 @@ from flask.ext.login import LoginManager
 from flask.ext.openid import OpenID
 from flask.ext.mail import Mail
 from flask.ext.babel import Babel, lazy_gettext
-#from flask.ext.bcrypt import Bcrypt
-#from flask.ext.principal import Principal
 from config import basedir, ADMINS, MAIL_SERVER, MAIL_PORT, MAIL_USERNAME, \
     MAIL_PASSWORD
 from .momentjs import momentjs
@@ -23,14 +21,6 @@ oid = OpenID(app, os.path.join(basedir, 'tmp'))
 mail = Mail(app)
 babel = Babel(app)
 
-#from .views.load import load
-#from .views.dashboard import dashboard
-#from .views.carrier import carrier
-#from .views.static import static
-#tronms.register_blueprint(load)
-#tronms.register_blueprint(carrier)
-#tronms.register_blueprint(dashboard)
-#tronms.register_blueprint(static)
 
 class CustomJSONEncoder(JSONEncoder):
     """This class adds support for lazy translation texts to Flask's
