@@ -1,192 +1,110 @@
-from tronms import db, bcrypt
-from sqlalchemy import create_engine, Column, Integer, String, Date, ForeignKey, event, Boolean, Table
-from sqlalchemy.orm import scoped_session, sessionmaker, backref, relationship
+from hashlib import md5
+import re
+from app import db
+from app import app
+from config import WHOOSH_ENABLED
+
+import sys
+if sys.version_info >= (3, 0):
+    enable_search = False
+else:
+    enable_search = WHOOSH_ENABLED
+    if enable_search:
+        import flask.ext.whooshalchemy as whooshalchemy
 
 
-user_to_user = db.Table('user_to_user', db.metadata,
-	db.Column("left_user_id", db.Integer, db.ForeignKey("user.email"), primary_key=True),
-	db.Column("right_user_id", db.Integer, db.ForeignKey("user.email"), primary_key=True)
+followers = db.Table(
+    'followers',
+    db.Column('follower_id', db.Integer, db.ForeignKey('user.id')),
+    db.Column('followed_id', db.Integer, db.ForeignKey('user.id'))
 )
 
-assigned_users = db.Table('assigned_users', db.metadata,
-	Column('user_id', Integer, ForeignKey('user.email')),
-	Column('load_id', Integer, ForeignKey('load.id'))
-)
 
 class User(db.Model):
-	#id = db.Column(db.Integer, primary_key=True)
-	
-	# User authentication information
-	#username = db.Column(db.String(50), nullable=False, unique=True)
-	password = db.Column(db.String(255), nullable=False, server_default='')
-	#reset_password_token = db.Column(db.String(100), nullable=False, server_default='')
+    id = db.Column(db.Integer, primary_key=True)
+    nickname = db.Column(db.String(64), index=True, unique=True)
+    email = db.Column(db.String(120), index=True, unique=True)
+    posts = db.relationship('Post', backref='author', lazy='dynamic')
+    about_me = db.Column(db.String(140))
+    last_seen = db.Column(db.DateTime)
+    followed = db.relationship('User',
+                               secondary=followers,
+                               primaryjoin=(followers.c.follower_id == id),
+                               secondaryjoin=(followers.c.followed_id == id),
+                               backref=db.backref('followers', lazy='dynamic'),
+                               lazy='dynamic')
 
-	# User email information
-	email = db.Column(db.String(255), nullable=False, unique=True, primary_key=True)
-	confirmed_at = db.Column(db.DateTime())
+    @staticmethod
+    def make_valid_nickname(nickname):
+        return re.sub('[^a-zA-Z0-9_\.]', '', nickname)
 
-	# User information
-	authenticated = db.Column(db.Boolean(), nullable=False, server_default='0')
-	company_name = db.Column(db.String(100), nullable=False, server_default='')
-	brokered_loads = db.relationship('Load', backref='broker', lazy='dynamic', foreign_keys='Load.broker_id')
-	assigned_loads = db.relationship('Load', backref='carrier', lazy='dynamic', foreign_keys='Load.carrier_id')
-	fleet = db.relationship("Fleet", uselist=False, backref="carrier")
-	contacts = db.relationship("User",
-					secondary=user_to_user,
-					primaryjoin=email==user_to_user.c.left_user_id,
-					secondaryjoin=email==user_to_user.c.right_user_id,
-					backref="contacted_by"
-    )
-	roles = db.relationship('Role')
+    @staticmethod
+    def make_unique_nickname(nickname):
+        if User.query.filter_by(nickname=nickname).first() is None:
+            return nickname
+        version = 2
+        while True:
+            new_nickname = nickname + str(version)
+            if User.query.filter_by(nickname=new_nickname).first() is None:
+                break
+            version += 1
+        return new_nickname
 
+    def is_authenticated(self):
+        return True
 
-	def __init__(self, email, company_name, password):
-		self.email = email
-		self.company_name = company_name
-		self.password = bcrypt.generate_password_hash(password)
-		self.fleet = Fleet()
+    def is_active(self):
+        return True
 
-	def is_carrier(self):
-		return len(filter((lambda role: role.name == 'carrier'), self.roles)) == 1
+    def is_anonymous(self):
+        return False
 
-	def get_id(self):
-		return self.email
+    def get_id(self):
+        try:
+            return unicode(self.id)  # python 2
+        except NameError:
+            return str(self.id)  # python 3
 
-	def is_active(self):
-		#True, as all users are active.
-		return True
+    def avatar(self, size):
+        return 'http://www.gravatar.com/avatar/%s?d=mm&s=%d' % \
+            (md5(self.email.encode('utf-8')).hexdigest(), size)
 
-	def is_authenticated(self):
-		#"""Return True if the user is authenticated."""
-		return self.authenticated
+    def follow(self, user):
+        if not self.is_following(user):
+            self.followed.append(user)
+            return self
 
-	def is_anonymous(self):
-		#False, as anonymous users aren't supported."""
-		return False
+    def unfollow(self, user):
+        if self.is_following(user):
+            self.followed.remove(user)
+            return self
 
-	def __repr__(self):
-		return '<User %r>' % (self.company_name)
+    def is_following(self, user):
+        return self.followed.filter(
+            followers.c.followed_id == user.id).count() > 0
 
-class Load(db.Model):
-	id = db.Column(db.Integer, primary_key=True)
-	user_id = db.Column(db.Integer, db.ForeignKey('user.email'))
-	name = db.Column(db.String(80), index=True)
-	status = db.Column(db.String(20))
-	lane = db.relationship("Lane", uselist=False, backref="load")
-	load_detail = db.relationship("LoadDetail", uselist=False, backref="load")
-	broker_id = db.Column(db.Integer, db.ForeignKey('user.email'))
-	carrier_id = db.Column(db.Integer, db.ForeignKey('user.email'))
-	bids = db.relationship('Bid', backref='load')
-	carrier_cost = db.Column(db.Float(3))
-	price = db.Column(db.Float(3))
-	description = db.Column(db.String(250))
-	driver_id = db.Column(db.Integer, db.ForeignKey('driver.id'))
-	assigned_driver = db.relationship("Driver", backref="loads")
-	
-	def __repr__(self):
-		return '<User %r>' % (self.name)
+    def followed_posts(self):
+        return Post.query.join(
+            followers, (followers.c.followed_id == Post.user_id)).filter(
+                followers.c.follower_id == self.id).order_by(
+                    Post.timestamp.desc())
 
-class Bid(db.Model):
-	id = db.Column(db.Integer, primary_key=True)
-	load_id = Column(Integer, ForeignKey('load.id'))
-	offered_by_id = Column(db.Integer, db.ForeignKey('user.email'))
-	offered_to_id = Column(db.Integer, db.ForeignKey('user.email'))
-	offered_by = relationship("User", foreign_keys=offered_by_id)
-	offered_to = relationship("User", backref="offered_bids", foreign_keys=offered_to_id)
-	value = db.Column(db.Float(3))
-	status = db.Column(db.String(10))
-
-class LoadDetail(db.Model):
-	id = db.Column(db.Integer, primary_key=True)
-	weight = db.Column(db.Integer)
-	dim_length = db.Column(db.Integer)
-	dim_width = db.Column(db.Integer)
-	dim_height = db.Column(db.Integer)
-	approx_miles = db.Column(db.Integer)
-	number_pieces = db.Column(db.Integer)
-	comments = db.Column(db.String(500))
-	load_id = db.Column(Integer, ForeignKey('load.id'))
-	pickup_date = db.Column(db.Date) 
-	delivery_date = db.Column(db.Date)
-	trailer_group = db.Column(db.String(20))
-	trailer_type = db.Column(db.String(20))
-	load_type = db.Column(db.String(20))
-	total_miles = db.Column(db.Integer) 
-	purchase_order = db.Column(db.String(20))
-	over_dimensional = db.Column(db.Boolean)
+    def __repr__(self):  # pragma: no cover
+        return '<User %r>' % (self.nickname)
 
 
-class Lane(db.Model):
-	id = db.Column(db.Integer, primary_key=True)
-	load_id = db.Column(Integer, ForeignKey('load.id'))
-	origin_id = db.Column(db.Integer, db.ForeignKey('location.id'))
-	destination_id = db.Column(db.Integer, db.ForeignKey('location.id'))
-	origin = db.relationship("Location", backref="origin_lanes", foreign_keys=origin_id)
-	destination = db.relationship("Location", backref="destination_lanes", foreign_keys=destination_id)
-	#locations = db.relationship('Location', backref='lane', lazy='dynamic')
+class Post(db.Model):
+    __searchable__ = ['body']
+
+    id = db.Column(db.Integer, primary_key=True)
+    body = db.Column(db.String(140))
+    timestamp = db.Column(db.DateTime)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    language = db.Column(db.String(5))
+
+    def __repr__(self):  # pragma: no cover
+        return '<Post %r>' % (self.body)
 
 
-class Location(db.Model):
-	id = db.Column(db.Integer, primary_key=True)
-	#lane_id = db.Column(db.Integer, db.ForeignKey('lane.id'))
-	address1 = db.Column(db.String(100))
-	address2 = db.Column(db.String(100))
-	city = db.Column(db.String(100))
-	state = db.Column(db.String(80))
-	postal_code = db.Column(db.Integer)
-	latitude = db.Column(db.Float(6))
-	longitude = db.Column(db.Float(6))
-	contact_name = db.Column(db.String(60))
-	contact_email = db.Column(db.String(30))
-	contact_phone = db.Column(db.String(30))
-
-	contact_phone_area_code = db.Column(db.String(3))
-	contact_phone_prefix = db.Column(db.String(3))
-	contact_phone_line_number = db.Column(db.String(4))
-
-	def __repr__(self):
-		return '%s, %s' % (self.city, self.state)
-
-class Fleet(db.Model):
-	id = db.Column(db.Integer, primary_key=True)
-	user_id = db.Column(Integer, ForeignKey('user.email'))
-	trucks = db.relationship('Truck', backref='fleet', lazy='dynamic')
-	drivers = db.relationship('Driver', backref='fleet', lazy='dynamic')
-
-
-class Truck(db.Model):
-	id = db.Column(db.Integer, primary_key = True)
-	user_id = db.Column(db.Integer, db.ForeignKey('user.email'))
-	fleet_id = db.Column(Integer, ForeignKey('fleet.id'))
-	driver_id = db.Column(db.Integer, db.ForeignKey('driver.id'))
-	name = db.Column(db.String(100))
-	latitude = db.Column(db.Float(6))
-	longitude = db.Column(db.Float(6))
-	is_available = db.Column(db.Boolean)
-	trailer_group = db.Column(db.String(30))
-	trailer_type = db.Column(db.String(30))
-	max_weight = db.Column(db.Integer)
-	dim_length = db.Column(db.Integer)
-	dim_height = db.Column(db.Integer)
-	dim_width = db.Column(db.Integer)
-
-class Driver(db.Model):
-	id = db.Column(db.Integer, primary_key = True)
-	fleet_id = db.Column(db.Integer, ForeignKey('fleet.id'))
-	user_id = db.Column(db.Integer, db.ForeignKey('user.email'))
-	first_name = db.Column(db.String(30))
-	last_name = db.Column(db.String(30))
-	phone_area_code = db.Column(db.String(3))
-	phone_prefix = db.Column(db.String(3))
-	phone_line_number = db.Column(db.String(4))
-	truck = db.relationship("Truck", uselist=False, backref="driver")
-
-	def get_phone_number(self):
-		return "1 (" + str(self.phone_area_code) + ")-" + str(self.phone_prefix) +"-" + str(self.phone_line_number)
-	def get_full_name(self):
-		return self.first_name + " " + self.last_name
-
-class Role(db.Model):
-	id = db.Column(db.Integer, primary_key=True)
-	name = db.Column(db.String(100))
-	user_id = db.Column(db.String, db.ForeignKey('user.email'))
+if enable_search:
+    whooshalchemy.whoosh_index(app, Post)
