@@ -70,4 +70,8 @@ if os.environ.get('HEROKU') is not None:
 
 app.jinja_env.globals['momentjs'] = momentjs
 
+tronms.jinja_env.globals['static'] = (
+    lambda filename: url_for('static', filename = filename)
+)
+
 from app import views, models
