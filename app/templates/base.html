@@ -11,18 +11,14 @@
     <script src="http://code.jquery.com/jquery-latest.js"></script>
     <script src="{{ url_for('.static', filename='js/bootstrap.min.js') }}"></script>
     <script src="{{ url_for('.static', filename='js/moment.min.js') }}"></script>#}
-        <meta charset="UTF-8" />
+        {#<meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-
-        <link rel="stylesheet" href="{{ static('css/datepicker.css') }}">
-        <link rel="stylesheet" href="{{ static('css/bootstrap.css') }}">
 
         <link rel="stylesheet" type="text/css" href="{{ static('css/bootstrap.css') }}" />
         <link rel="stylesheet" type="text/css" href="{{ static('css/bootstrap-responsive.css') }}" />
         <link rel="stylesheet" type="text/css" href="{{ static('css/datepicker.css') }}" />
         <link rel="stylesheet" type="text/css" href="{{ static('css/imperio.css') }}" />
-        <link rel="stylesheet" href="//code.jquery.com/ui/1.11.2/themes/smoothness/jquery-ui.css">
+        <link rel="stylesheet" href="//code.jquery.com/ui/1.11.2/themes/smoothness/jquery-ui.css">#}
     {% if g.locale != 'en' %}
     <script src="{{ url_for('.static', filename='js/moment-' + g.locale + '.min.js') }}"></script>
     {% endif %}
